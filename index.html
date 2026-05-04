@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Snake</title>
+<title>Doggo</title>
 <style>
   :root {
     --bg: #0b1020;
@@ -100,7 +100,7 @@
 <body>
   <div class="wrap">
     <header>
-      <h1>Snake</h1>
+      <h1>Doggo</h1>
       <div class="stats">
         <span>Score <b id="score">0</b></span>
         <span>Best <b id="best">0</b></span>
@@ -196,6 +196,13 @@
     }
   }
 
+  const DOG_BODY = '#a86a3d';
+  const DOG_BELLY = '#c79268';
+  const DOG_DARK = '#5d3a1f';
+  const DOG_PAW = '#3a2010';
+  const DOG_INK = '#1a0e08';
+  const BONE = '#f5e6c8';
+
   function draw() {
     ctx.fillStyle = '#121a33';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -209,35 +216,127 @@
       ctx.beginPath(); ctx.moveTo(0, j * CELL + 0.5); ctx.lineTo(canvas.width, j * CELL + 0.5); ctx.stroke();
     }
 
-    const t = performance.now() / 400;
-    const pulse = 0.85 + Math.sin(t) * 0.15;
-    ctx.fillStyle = '#f472b6';
-    ctx.shadowColor = '#f472b6';
-    ctx.shadowBlur = 12 * pulse;
-    const fr = (CELL * 0.42) * pulse;
-    ctx.beginPath();
-    ctx.arc(food.x * CELL + CELL / 2, food.y * CELL + CELL / 2, fr, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
+    drawBone(food.x * CELL + CELL / 2, food.y * CELL + CELL / 2);
 
     for (let i = snake.length - 1; i >= 0; i--) {
       const s = snake[i];
+      const px = s.x * CELL;
+      const py = s.y * CELL;
       const isHead = i === 0;
-      ctx.fillStyle = isHead ? '#34d399' : '#6ee7b7';
-      const pad = isHead ? 1 : 2;
-      const r = isHead ? 6 : 4;
-      roundRect(ctx, s.x * CELL + pad, s.y * CELL + pad, CELL - pad * 2, CELL - pad * 2, r);
-      ctx.fill();
+      const isTail = i === snake.length - 1;
+
       if (isHead) {
-        ctx.fillStyle = '#0b1020';
-        const cx = s.x * CELL + CELL / 2;
-        const cy = s.y * CELL + CELL / 2;
-        const offX = dir.x * 4, offY = dir.y * 4;
-        const perpX = -dir.y * 4, perpY = dir.x * 4;
-        ctx.beginPath(); ctx.arc(cx + offX + perpX, cy + offY + perpY, 2, 0, Math.PI * 2); ctx.fill();
-        ctx.beginPath(); ctx.arc(cx + offX - perpX, cy + offY - perpY, 2, 0, Math.PI * 2); ctx.fill();
+        drawDogHead(px, py);
+      } else if (isTail) {
+        drawDogTail(px, py);
+      } else {
+        drawDogBody(px, py);
+        if (i === 1 || i === snake.length - 2) drawDogLegs(px, py);
       }
     }
+  }
+
+  function drawDogBody(px, py) {
+    ctx.fillStyle = DOG_BODY;
+    roundRect(ctx, px + 1, py + 4, CELL - 2, CELL - 8, 5);
+    ctx.fill();
+    ctx.fillStyle = DOG_BELLY;
+    ctx.fillRect(px + 3, py + CELL / 2 + 1, CELL - 6, 4);
+  }
+
+  function drawDogTail(px, py) {
+    ctx.fillStyle = DOG_BODY;
+    const cx = px + CELL / 2;
+    const cy = py + CELL / 2;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, CELL / 2 - 5, CELL / 2 - 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = DOG_DARK;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawDogLegs(px, py) {
+    ctx.fillStyle = DOG_DARK;
+    ctx.fillRect(px + 4, py + CELL - 6, 3, 5);
+    ctx.fillRect(px + CELL - 7, py + CELL - 6, 3, 5);
+    ctx.fillStyle = DOG_PAW;
+    ctx.fillRect(px + 3, py + CELL - 3, 5, 2);
+    ctx.fillRect(px + CELL - 8, py + CELL - 3, 5, 2);
+  }
+
+  function drawDogHead(px, py) {
+    const cx = px + CELL / 2;
+    const cy = py + CELL / 2;
+    const perpX = -dir.y;
+    const perpY = dir.x;
+
+    ctx.fillStyle = DOG_DARK;
+    const earBackX = cx - dir.x * 3;
+    const earBackY = cy - dir.y * 3;
+    ctx.beginPath();
+    ctx.ellipse(earBackX + perpX * 5, earBackY + perpY * 5, 4, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(earBackX - perpX * 5, earBackY - perpY * 5, 4, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = DOG_BODY;
+    roundRect(ctx, px + 2, py + 2, CELL - 4, CELL - 4, 7);
+    ctx.fill();
+
+    ctx.fillStyle = '#8b5a30';
+    let sx, sy, sw, sh;
+    if (dir.x !== 0) {
+      sw = 7; sh = 8;
+      sx = dir.x > 0 ? cx + 2 : cx - 2 - sw;
+      sy = cy - sh / 2;
+    } else {
+      sw = 8; sh = 7;
+      sx = cx - sw / 2;
+      sy = dir.y > 0 ? cy + 2 : cy - 2 - sh;
+    }
+    roundRect(ctx, sx, sy, sw, sh, 3);
+    ctx.fill();
+
+    ctx.fillStyle = DOG_INK;
+    const noseX = cx + dir.x * (CELL / 2 - 3);
+    const noseY = cy + dir.y * (CELL / 2 - 3);
+    ctx.beginPath();
+    ctx.arc(noseX, noseY, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    const eyeX = cx + dir.x * 2 + perpX * 4;
+    const eyeY = cy + dir.y * 2 + perpY * 4;
+    ctx.beginPath();
+    ctx.arc(eyeX, eyeY, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(eyeX + 0.6, eyeY - 0.6, 0.7, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawBone(cx, cy) {
+    const t = performance.now() / 400;
+    const pulse = 0.92 + Math.sin(t) * 0.08;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(-Math.PI / 6);
+    ctx.scale(pulse, pulse);
+    ctx.fillStyle = BONE;
+    ctx.shadowColor = BONE;
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(-7, -3, 3, 0, Math.PI * 2);
+    ctx.arc(-7, 3, 3, 0, Math.PI * 2);
+    ctx.arc(7, -3, 3, 0, Math.PI * 2);
+    ctx.arc(7, 3, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(-7, -2.5, 14, 5);
+    ctx.shadowBlur = 0;
+    ctx.restore();
   }
 
   function roundRect(ctx, x, y, w, h, r) {
