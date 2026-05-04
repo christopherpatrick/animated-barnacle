@@ -8,12 +8,12 @@
   :root {
     --bg: #0b1020;
     --grid: #121a33;
-    --snake: #6ee7b7;
-    --snake-head: #34d399;
-    --food: #f472b6;
     --text: #e2e8f0;
     --muted: #94a3b8;
     --accent: #818cf8;
+    --gold: #fbbf24;
+    --pink: #fb7185;
+    --cyan: #22d3ee;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -30,7 +30,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 14px;
+    gap: 12px;
     padding: 16px;
   }
   header {
@@ -50,8 +50,27 @@
     gap: 18px;
     font-size: 14px;
     color: var(--muted);
+    align-items: baseline;
   }
   .stats b { color: var(--text); font-weight: 600; }
+  .effects {
+    display: flex;
+    gap: 8px;
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+  .effect-chip {
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(34, 211, 238, 0.15);
+    color: var(--cyan);
+    border: 1px solid rgba(34, 211, 238, 0.4);
+  }
+  .effect-chip.slow {
+    background: rgba(251, 113, 133, 0.15);
+    color: var(--pink);
+    border-color: rgba(251, 113, 133, 0.4);
+  }
   .board {
     position: relative;
     border: 1px solid #1f2a4a;
@@ -62,7 +81,6 @@
   canvas {
     display: block;
     border-radius: 10px;
-    image-rendering: pixelated;
   }
   .overlay {
     position: absolute;
@@ -95,6 +113,48 @@
     color: var(--text);
     font-size: 12px;
   }
+  .breeds {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .breed {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #1a2240;
+    border: 1px solid #2a3766;
+    border-radius: 6px;
+    padding: 5px 10px;
+    color: var(--text);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .breed:hover:not(.locked) { border-color: var(--accent); }
+  .breed.active { border-color: var(--accent); background: #2a3766; }
+  .breed.locked { opacity: 0.45; cursor: not-allowed; }
+  .breed .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.3);
+  }
+  .breed .lock { color: var(--muted); font-size: 10px; }
+  .mute {
+    background: transparent;
+    border: 1px solid #2a3766;
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+  }
+  .mute:hover { color: var(--text); }
 </style>
 </head>
 <body>
@@ -104,6 +164,7 @@
       <div class="stats">
         <span>Score <b id="score">0</b></span>
         <span>Best <b id="best">0</b></span>
+        <span class="effects" id="effects"></span>
       </div>
     </header>
     <div class="board" id="board">
@@ -115,8 +176,9 @@
     </div>
     <div class="hint">
       Move <kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd> or <kbd>WASD</kbd>
-      &middot; Pause <kbd>P</kbd> &middot; Restart <kbd>R</kbd>
+      &middot; Pause <kbd>P</kbd> &middot; Restart <kbd>R</kbd> &middot; Mute <kbd>M</kbd>
     </div>
+    <div class="breeds" id="breeds"></div>
   </div>
 
 <script>
@@ -130,15 +192,57 @@
   const ctx = canvas.getContext('2d');
   const scoreEl = document.getElementById('score');
   const bestEl = document.getElementById('best');
+  const effectsEl = document.getElementById('effects');
   const overlay = document.getElementById('overlay');
   const overlayTitle = document.getElementById('overlayTitle');
   const overlaySub = document.getElementById('overlaySub');
+  const breedsEl = document.getElementById('breeds');
 
   const STATE = { READY: 'ready', PLAYING: 'playing', PAUSED: 'paused', OVER: 'over' };
-  let state, snake, dir, nextDir, food, score, tickMs, lastTick, best;
+  const BREEDS = {
+    dachshund: { name: 'Dachshund', unlock: 0, body: '#a86a3d', belly: '#c79268', dark: '#5d3a1f', paw: '#3a2010', snout: '#8b5a30', ears: 'floppy', tail: 'taper', coat: 'smooth' },
+    corgi:     { name: 'Corgi',     unlock: 5, body: '#d4a373', belly: '#fefae0', dark: '#7a5634', paw: '#3a2010', snout: '#a8825c', ears: 'pointy', tail: 'stub',  coat: 'smooth' },
+    poodle:    { name: 'Poodle',    unlock:15, body: '#ece9e3', belly: '#ffffff', dark: '#a8a298', paw: '#6a655c', snout: '#d4d0c8', ears: 'floppy', tail: 'pom',   coat: 'curly'  },
+    pug:       { name: 'Pug',       unlock:30, body: '#d4b896', belly: '#e8d6b8', dark: '#2a1f15', paw: '#2a1f15', snout: '#2a1f15', ears: 'small',  tail: 'curl',  coat: 'smooth' },
+  };
+  const BREED_ORDER = ['dachshund', 'corgi', 'poodle', 'pug'];
 
-  best = parseInt(localStorage.getItem('snake.best') || '0', 10);
+  let state, snake, dir, nextDir, food, score, tickMs, lastTick, best;
+  let obstacles, particles, slowmoTicks, phaseTicks, shakeTime;
+  let breed = localStorage.getItem('doggo.breed') || 'dachshund';
+  let muted = localStorage.getItem('doggo.muted') === '1';
+
+  best = parseInt(localStorage.getItem('doggo.best') || localStorage.getItem('snake.best') || '0', 10);
   bestEl.textContent = best;
+
+  const audio = (() => {
+    let ac = null;
+    function ensure() {
+      if (muted) return null;
+      if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+      return ac;
+    }
+    function tone({ type = 'square', freq = 440, freqEnd, dur = 0.12, gain = 0.12, when = 0 }) {
+      const a = ensure(); if (!a) return;
+      const t = a.currentTime + when;
+      const osc = a.createOscillator();
+      const g = a.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, t);
+      if (freqEnd) osc.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+      g.gain.setValueAtTime(gain, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(g).connect(a.destination);
+      osc.start(t);
+      osc.stop(t + dur + 0.02);
+    }
+    return {
+      bark() { tone({ type: 'square', freq: 420, freqEnd: 280, dur: 0.1 }); setTimeout(() => tone({ type: 'square', freq: 380, freqEnd: 240, dur: 0.1 }), 110); },
+      chime() { [523.25, 659.25, 783.99].forEach((f, i) => tone({ type: 'triangle', freq: f, dur: 0.18, gain: 0.1, when: i * 0.06 })); },
+      whimper() { tone({ type: 'sawtooth', freq: 380, freqEnd: 110, dur: 0.7, gain: 0.1 }); },
+      pop() { tone({ type: 'sine', freq: 880, freqEnd: 220, dur: 0.08, gain: 0.08 }); },
+    };
+  })();
 
   function reset() {
     snake = [{ x: 10, y: 10 }, { x: 9, y: 10 }, { x: 8, y: 10 }];
@@ -147,17 +251,74 @@
     score = 0;
     tickMs = 120;
     lastTick = 0;
+    obstacles = [];
+    particles = [];
+    slowmoTicks = 0;
+    phaseTicks = 0;
+    shakeTime = 0;
     placeFood();
     scoreEl.textContent = score;
     state = STATE.READY;
     showOverlay('Ready?', 'Press any arrow key or <kbd>Space</kbd> to start');
+    updateEffects();
     draw();
   }
 
   function placeFood() {
+    const r = Math.random();
+    let type;
+    if (r < 0.70) type = 'bone';
+    else if (r < 0.82) type = 'gold';
+    else if (r < 0.92) type = 'sausage';
+    else type = 'ball';
     while (true) {
-      const f = { x: (Math.random() * COLS) | 0, y: (Math.random() * ROWS) | 0 };
-      if (!snake.some(s => s.x === f.x && s.y === f.y)) { food = f; return; }
+      const x = (Math.random() * COLS) | 0;
+      const y = (Math.random() * ROWS) | 0;
+      if (snake.some(s => s.x === x && s.y === y)) continue;
+      if (obstacles.some(o => o.x === x && o.y === y)) continue;
+      food = { x, y, type };
+      return;
+    }
+  }
+
+  function spawnObstacle() {
+    if (obstacles.length >= 12) return;
+    const head = snake[0];
+    for (let attempts = 0; attempts < 200; attempts++) {
+      const x = (Math.random() * COLS) | 0;
+      const y = (Math.random() * ROWS) | 0;
+      if (Math.abs(x - head.x) <= 2 && Math.abs(y - head.y) <= 2) continue;
+      if (snake.some(s => s.x === x && s.y === y)) continue;
+      if (obstacles.some(o => o.x === x && o.y === y)) continue;
+      if (food && food.x === x && food.y === y) continue;
+      obstacles.push({ x, y });
+      return;
+    }
+  }
+
+  function emitBurst(cx, cy, color, count, speed) {
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const v = Math.random() * speed + 0.6;
+      particles.push({
+        x: cx, y: cy,
+        vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+        life: 30 + Math.random() * 25,
+        maxLife: 50,
+        color, r: 1 + Math.random() * 2.2,
+      });
+    }
+  }
+
+  function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= 0.93;
+      p.vy = p.vy * 0.93 + 0.08;
+      p.life--;
+      if (p.life <= 0) particles.splice(i, 1);
     }
   }
 
@@ -168,44 +329,98 @@
   }
   function hideOverlay() { overlay.classList.remove('show'); }
 
+  function updateEffects() {
+    const parts = [];
+    if (phaseTicks > 0) parts.push(`<span class="effect-chip">PHASE ${phaseTicks}</span>`);
+    if (slowmoTicks > 0) parts.push(`<span class="effect-chip slow">SLOW ${slowmoTicks}</span>`);
+    effectsEl.innerHTML = parts.join('');
+  }
+
   function step() {
     dir = nextDir;
-    const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
-    if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) return gameOver();
-    if (snake.some((s, i) => i < snake.length - 1 && s.x === head.x && s.y === head.y)) return gameOver();
+    let head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+
+    if (phaseTicks > 0) {
+      head.x = (head.x + COLS) % COLS;
+      head.y = (head.y + ROWS) % ROWS;
+    } else {
+      if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) return die();
+      if (snake.some((s, i) => i < snake.length - 1 && s.x === head.x && s.y === head.y)) return die();
+      if (obstacles.some(o => o.x === head.x && o.y === head.y)) return die();
+    }
+
     snake.unshift(head);
+
     if (head.x === food.x && head.y === food.y) {
-      score += 1;
+      const t = food.type;
+      const cx = food.x * CELL + CELL / 2;
+      const cy = food.y * CELL + CELL / 2;
+      let pts = 1;
+      if (t === 'gold') {
+        pts = 3;
+        emitBurst(cx, cy, '#fbbf24', 24, 4);
+        emitBurst(cx, cy, '#fde68a', 12, 2.2);
+        audio.chime();
+      } else if (t === 'sausage') {
+        slowmoTicks = 40;
+        emitBurst(cx, cy, '#fb7185', 18, 3);
+        audio.chime();
+      } else if (t === 'ball') {
+        phaseTicks = 30;
+        emitBurst(cx, cy, '#22d3ee', 22, 4);
+        audio.chime();
+      } else {
+        emitBurst(cx, cy, '#f5e6c8', 12, 2.5);
+        audio.bark();
+      }
+      score += pts;
       scoreEl.textContent = score;
       if (tickMs > 60) tickMs -= 2;
+      const prevBucket = Math.floor((score - pts) / 5);
+      const newBucket = Math.floor(score / 5);
+      for (let b = prevBucket + 1; b <= newBucket; b++) spawnObstacle();
       placeFood();
     } else {
       snake.pop();
     }
+
+    if (slowmoTicks > 0) slowmoTicks--;
+    if (phaseTicks > 0) phaseTicks--;
+    updateEffects();
   }
 
-  function gameOver() {
+  function die() {
     state = STATE.OVER;
+    shakeTime = 28;
+    audio.whimper();
+    const cx = snake[0].x * CELL + CELL / 2;
+    const cy = snake[0].y * CELL + CELL / 2;
+    emitBurst(cx, cy, BREEDS[breed].body, 30, 5);
     if (score > best) {
       best = score;
-      localStorage.setItem('snake.best', String(best));
+      localStorage.setItem('doggo.best', String(best));
       bestEl.textContent = best;
+      renderBreeds();
       showOverlay('New Best!', `Score <b>${score}</b> &middot; Press <kbd>R</kbd> to play again`);
     } else {
       showOverlay('Game Over', `Score <b>${score}</b> &middot; Press <kbd>R</kbd> to play again`);
     }
   }
 
-  const DOG_BODY = '#a86a3d';
-  const DOG_BELLY = '#c79268';
-  const DOG_DARK = '#5d3a1f';
-  const DOG_PAW = '#3a2010';
-  const DOG_INK = '#1a0e08';
-  const BONE = '#f5e6c8';
-
   function draw() {
+    let shakeX = 0, shakeY = 0;
+    if (shakeTime > 0) {
+      const mag = Math.min(8, shakeTime / 4);
+      shakeX = (Math.random() - 0.5) * mag * 2;
+      shakeY = (Math.random() - 0.5) * mag * 2;
+      shakeTime--;
+    }
+
+    ctx.save();
+    ctx.translate(shakeX, shakeY);
+
     ctx.fillStyle = '#121a33';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(-12, -12, canvas.width + 24, canvas.height + 24);
 
     ctx.strokeStyle = 'rgba(255,255,255,0.025)';
     ctx.lineWidth = 1;
@@ -216,77 +431,257 @@
       ctx.beginPath(); ctx.moveTo(0, j * CELL + 0.5); ctx.lineTo(canvas.width, j * CELL + 0.5); ctx.stroke();
     }
 
-    drawBone(food.x * CELL + CELL / 2, food.y * CELL + CELL / 2);
+    for (const o of obstacles) drawHydrant(o.x * CELL, o.y * CELL);
 
+    drawFood(food);
+
+    const ghost = phaseTicks > 0;
+    if (ghost) ctx.globalAlpha = 0.55;
     for (let i = snake.length - 1; i >= 0; i--) {
       const s = snake[i];
       const px = s.x * CELL;
       const py = s.y * CELL;
       const isHead = i === 0;
       const isTail = i === snake.length - 1;
-
-      if (isHead) {
-        drawDogHead(px, py);
-      } else if (isTail) {
-        drawDogTail(px, py);
-      } else {
+      if (isHead) drawDogHead(px, py);
+      else if (isTail) drawDogTail(px, py);
+      else {
         drawDogBody(px, py);
         if (i === 1 || i === snake.length - 2) drawDogLegs(px, py);
       }
     }
+    if (ghost) ctx.globalAlpha = 1;
+
+    drawParticles();
+
+    ctx.restore();
+  }
+
+  function drawParticles() {
+    for (const p of particles) {
+      ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawFood(f) {
+    const cx = f.x * CELL + CELL / 2;
+    const cy = f.y * CELL + CELL / 2;
+    if (f.type === 'bone') drawBone(cx, cy, '#f5e6c8');
+    else if (f.type === 'gold') drawBone(cx, cy, '#fbbf24', true);
+    else if (f.type === 'sausage') drawSausage(cx, cy);
+    else if (f.type === 'ball') drawBall(cx, cy);
+  }
+
+  function drawBone(cx, cy, color, sparkle) {
+    const t = performance.now() / 400;
+    const pulse = 0.92 + Math.sin(t) * 0.08;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(-Math.PI / 6);
+    ctx.scale(pulse, pulse);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = sparkle ? 18 : 10;
+    ctx.beginPath();
+    ctx.arc(-7, -3, 3, 0, Math.PI * 2);
+    ctx.arc(-7, 3, 3, 0, Math.PI * 2);
+    ctx.arc(7, -3, 3, 0, Math.PI * 2);
+    ctx.arc(7, 3, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(-7, -2.5, 14, 5);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+    if (sparkle) {
+      const a = (performance.now() / 200) % (Math.PI * 2);
+      ctx.fillStyle = '#fef9c3';
+      ctx.beginPath();
+      ctx.arc(cx + Math.cos(a) * 9, cy + Math.sin(a) * 9, 1.2, 0, Math.PI * 2);
+      ctx.arc(cx + Math.cos(a + 2) * 9, cy + Math.sin(a + 2) * 9, 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawSausage(cx, cy) {
+    const t = performance.now() / 400;
+    const pulse = 0.94 + Math.sin(t) * 0.06;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(Math.PI / 8);
+    ctx.scale(pulse, pulse);
+    ctx.fillStyle = '#c0533a';
+    ctx.shadowColor = '#fb7185';
+    ctx.shadowBlur = 10;
+    roundRect(ctx, -8, -3, 16, 6, 3);
+    ctx.fill();
+    ctx.fillStyle = '#7c2d12';
+    ctx.fillRect(-7, -3, 1.5, 6);
+    ctx.fillRect(5.5, -3, 1.5, 6);
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+
+  function drawBall(cx, cy) {
+    const t = performance.now() / 300;
+    const pulse = 0.94 + Math.sin(t) * 0.06;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(pulse, pulse);
+    ctx.fillStyle = '#22d3ee';
+    ctx.shadowColor = '#22d3ee';
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(0, 0, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#0e7490';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(-2, 0, 6, -Math.PI / 2.5, Math.PI / 2.5);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(2, 0, 6, Math.PI - Math.PI / 2.5, Math.PI + Math.PI / 2.5);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawHydrant(px, py) {
+    ctx.fillStyle = '#dc2626';
+    roundRect(ctx, px + 5, py + 7, CELL - 10, CELL - 11, 3);
+    ctx.fill();
+    ctx.fillStyle = '#b91c1c';
+    ctx.beginPath();
+    ctx.arc(px + CELL / 2, py + 7, 5, Math.PI, 0);
+    ctx.fill();
+    ctx.fillRect(px + 3, py + CELL / 2 - 1, 3, 4);
+    ctx.fillRect(px + CELL - 6, py + CELL / 2 - 1, 3, 4);
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillRect(px + CELL / 2 - 1, py + 3, 2, 4);
+    ctx.fillStyle = '#7f1d1d';
+    ctx.fillRect(px + 4, py + CELL - 5, CELL - 8, 2);
   }
 
   function drawDogBody(px, py) {
-    ctx.fillStyle = DOG_BODY;
+    const br = BREEDS[breed];
+    ctx.fillStyle = br.body;
     roundRect(ctx, px + 1, py + 4, CELL - 2, CELL - 8, 5);
     ctx.fill();
-    ctx.fillStyle = DOG_BELLY;
+    ctx.fillStyle = br.belly;
     ctx.fillRect(px + 3, py + CELL / 2 + 1, CELL - 6, 4);
+    if (br.coat === 'curly') {
+      ctx.fillStyle = br.body;
+      ctx.beginPath();
+      ctx.arc(px + 5, py + 6, 2.5, 0, Math.PI * 2);
+      ctx.arc(px + 12, py + 5, 2.8, 0, Math.PI * 2);
+      ctx.arc(px + 19, py + 7, 2.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   function drawDogTail(px, py) {
-    ctx.fillStyle = DOG_BODY;
+    const br = BREEDS[breed];
     const cx = px + CELL / 2;
     const cy = py + CELL / 2;
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, CELL / 2 - 5, CELL / 2 - 7, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = DOG_DARK;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 1.5, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle = br.body;
+    if (br.tail === 'taper') {
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, CELL / 2 - 5, CELL / 2 - 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = br.dark;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (br.tail === 'stub') {
+      ctx.beginPath();
+      ctx.arc(cx, cy, CELL / 2 - 6, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (br.tail === 'pom') {
+      ctx.beginPath();
+      ctx.arc(cx, cy, CELL / 2 - 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = br.belly;
+      ctx.beginPath();
+      ctx.arc(cx - 2, cy - 2, 1.6, 0, Math.PI * 2);
+      ctx.arc(cx + 2, cy + 1, 1.4, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (br.tail === 'curl') {
+      ctx.beginPath();
+      ctx.arc(cx, cy, CELL / 2 - 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = br.dark;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3, -Math.PI / 2, Math.PI);
+      ctx.stroke();
+    }
   }
 
   function drawDogLegs(px, py) {
-    ctx.fillStyle = DOG_DARK;
+    const br = BREEDS[breed];
+    ctx.fillStyle = br.dark;
     ctx.fillRect(px + 4, py + CELL - 6, 3, 5);
     ctx.fillRect(px + CELL - 7, py + CELL - 6, 3, 5);
-    ctx.fillStyle = DOG_PAW;
+    ctx.fillStyle = br.paw;
     ctx.fillRect(px + 3, py + CELL - 3, 5, 2);
     ctx.fillRect(px + CELL - 8, py + CELL - 3, 5, 2);
   }
 
   function drawDogHead(px, py) {
+    const br = BREEDS[breed];
     const cx = px + CELL / 2;
     const cy = py + CELL / 2;
     const perpX = -dir.y;
     const perpY = dir.x;
 
-    ctx.fillStyle = DOG_DARK;
-    const earBackX = cx - dir.x * 3;
-    const earBackY = cy - dir.y * 3;
-    ctx.beginPath();
-    ctx.ellipse(earBackX + perpX * 5, earBackY + perpY * 5, 4, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(earBackX - perpX * 5, earBackY - perpY * 5, 4, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle = br.dark;
+    if (br.ears === 'floppy') {
+      const ebx = cx - dir.x * 3;
+      const eby = cy - dir.y * 3;
+      ctx.beginPath(); ctx.ellipse(ebx + perpX * 5, eby + perpY * 5, 4, 6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(ebx - perpX * 5, eby - perpY * 5, 4, 6, 0, 0, Math.PI * 2); ctx.fill();
+    } else if (br.ears === 'pointy') {
+      [-1, 1].forEach(s => {
+        const baseX = cx + perpX * 3 * s;
+        const baseY = cy + perpY * 3 * s;
+        const apexX = cx + perpX * 8 * s - dir.x * 2;
+        const apexY = cy + perpY * 8 * s - dir.y * 2;
+        ctx.beginPath();
+        ctx.moveTo(baseX - dir.x * 3, baseY - dir.y * 3);
+        ctx.lineTo(apexX, apexY);
+        ctx.lineTo(baseX + dir.x * 2, baseY + dir.y * 2);
+        ctx.closePath();
+        ctx.fill();
+      });
+    } else if (br.ears === 'small') {
+      const ebx = cx - dir.x * 1;
+      const eby = cy - dir.y * 1;
+      [-1, 1].forEach(s => {
+        const ex = ebx + perpX * 5 * s;
+        const ey = eby + perpY * 5 * s;
+        ctx.beginPath();
+        ctx.ellipse(ex, ey, 2.5, 3.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
 
-    ctx.fillStyle = DOG_BODY;
+    ctx.fillStyle = br.body;
     roundRect(ctx, px + 2, py + 2, CELL - 4, CELL - 4, 7);
     ctx.fill();
 
-    ctx.fillStyle = '#8b5a30';
+    if (br.coat === 'curly') {
+      ctx.fillStyle = br.body;
+      [[5, 5], [CELL - 5, 5], [5, CELL - 5], [CELL - 5, CELL - 5], [CELL / 2, 4]].forEach(([dx, dy]) => {
+        ctx.beginPath();
+        ctx.arc(px + dx, py + dy, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    ctx.fillStyle = br.snout;
     let sx, sy, sw, sh;
     if (dir.x !== 0) {
       sw = 7; sh = 8;
@@ -300,7 +695,7 @@
     roundRect(ctx, sx, sy, sw, sh, 3);
     ctx.fill();
 
-    ctx.fillStyle = DOG_INK;
+    ctx.fillStyle = '#1a0e08';
     const noseX = cx + dir.x * (CELL / 2 - 3);
     const noseY = cy + dir.y * (CELL / 2 - 3);
     ctx.beginPath();
@@ -318,27 +713,6 @@
     ctx.fill();
   }
 
-  function drawBone(cx, cy) {
-    const t = performance.now() / 400;
-    const pulse = 0.92 + Math.sin(t) * 0.08;
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(-Math.PI / 6);
-    ctx.scale(pulse, pulse);
-    ctx.fillStyle = BONE;
-    ctx.shadowColor = BONE;
-    ctx.shadowBlur = 10;
-    ctx.beginPath();
-    ctx.arc(-7, -3, 3, 0, Math.PI * 2);
-    ctx.arc(-7, 3, 3, 0, Math.PI * 2);
-    ctx.arc(7, -3, 3, 0, Math.PI * 2);
-    ctx.arc(7, 3, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillRect(-7, -2.5, 14, 5);
-    ctx.shadowBlur = 0;
-    ctx.restore();
-  }
-
   function roundRect(ctx, x, y, w, h, r) {
     r = Math.min(r, w / 2, h / 2);
     ctx.beginPath();
@@ -352,8 +726,10 @@
 
   function loop(now) {
     if (state === STATE.PLAYING) {
-      if (now - lastTick >= tickMs) { lastTick = now; step(); }
+      const eff = slowmoTicks > 0 ? tickMs * 1.7 : tickMs;
+      if (now - lastTick >= eff) { lastTick = now; step(); }
     }
+    updateParticles();
     draw();
     requestAnimationFrame(loop);
   }
@@ -371,12 +747,43 @@
     nextDir = { x, y };
   }
 
+  function renderBreeds() {
+    breedsEl.innerHTML = '';
+    for (const key of BREED_ORDER) {
+      const def = BREEDS[key];
+      const unlocked = best >= def.unlock;
+      const btn = document.createElement('button');
+      btn.className = 'breed' + (key === breed ? ' active' : '') + (unlocked ? '' : ' locked');
+      const swatch = `<span class="swatch" style="background:${def.body}"></span>`;
+      const label = `<span>${def.name}</span>`;
+      const lock = unlocked ? '' : `<span class="lock">${def.unlock}+</span>`;
+      btn.innerHTML = `${swatch}${label}${lock}`;
+      if (unlocked) {
+        btn.addEventListener('click', () => {
+          breed = key;
+          localStorage.setItem('doggo.breed', key);
+          renderBreeds();
+        });
+      }
+      breedsEl.appendChild(btn);
+    }
+  }
+
+  if (!BREEDS[breed] || best < BREEDS[breed].unlock) breed = 'dachshund';
+  renderBreeds();
+
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
-    if (['arrowup','arrowdown','arrowleft','arrowright',' '].includes(e.key.toLowerCase()) ||
-        ['w','a','s','d',' '].includes(k)) e.preventDefault();
+    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(e.key.toLowerCase()) ||
+        ['w', 'a', 's', 'd', ' '].includes(k)) e.preventDefault();
     if (state === STATE.OVER && (k === 'r' || k === ' ')) { reset(); start(); return; }
     if (k === 'r') { reset(); return; }
+    if (k === 'm') {
+      muted = !muted;
+      localStorage.setItem('doggo.muted', muted ? '1' : '0');
+      if (!muted) audio.pop();
+      return;
+    }
     if (k === 'p') {
       if (state === STATE.PLAYING) { state = STATE.PAUSED; showOverlay('Paused', 'Press <kbd>P</kbd> to resume'); }
       else if (state === STATE.PAUSED) { start(); }
